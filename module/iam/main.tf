@@ -3,13 +3,13 @@ resource "aws_iam_user" "terraform_user" {
   path = "/system/"
 
   tags = {
-    tag-key = "prod user name"
+    tag-key     = "prod user name"
     description = "new Iam username- ${var.user_name}"
   }
 }
 resource "aws_iam_group" "developers" {
   path = "/users/"
-  name =var.group_name
+  name = var.group_name
 
 }
 resource "aws_iam_user_group_membership" "add-user-to-group" {

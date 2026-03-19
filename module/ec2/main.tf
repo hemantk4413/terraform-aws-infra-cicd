@@ -6,7 +6,7 @@ data "aws_ami" "ec2" {
     values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
   }
 
-  owners = ["amazon"]  
+  owners = ["amazon"]
   #owners = ["099720109477"] # Canonical
 }
 

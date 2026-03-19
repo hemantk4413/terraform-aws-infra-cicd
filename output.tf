@@ -23,11 +23,11 @@ output "subnet_id" {
   value       = module.vpc.subnet_id
 }
 output "user_name" {
-    value = module.terraform_user.user_name
+  value = module.terraform_user.user_name
 }
 output "s3bucket_name1" {
   value = module.demo_ducket.bucket_name
-  
+
 }
 output "New-group" {
   value = module.terraform_user.group_name

@@ -31,8 +31,8 @@ module "ec2_instance" {
 }
 
 module "demo_bucket" {
-  source  = "./module/s3"
-  env     = var.env
+  source = "./module/s3"
+  env    = var.env
 }
 
 module "terraform_user" {
