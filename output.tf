@@ -26,7 +26,7 @@ output "user_name" {
   value = module.terraform_user.user_name
 }
 output "s3bucket_name1" {
-  value = module.demo_ducket.bucket_name
+  value = module.demo_bucket.bucket_name
 
 }
 output "New-group" {
