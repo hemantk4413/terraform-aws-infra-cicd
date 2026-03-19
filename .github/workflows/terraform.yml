@@ -1,0 +1,189 @@
+name: Terraform CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - test
+
+env:
+  TF_VERSION: "1.9.0"
+  AWS_REGION: "us-east-1"
+
+jobs:
+
+  # ── Stage 1: Security Scan ─────────────────────────────────────────────────
+  security-scan:
+    name: "Stage 1: Security Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          soft_fail: true
+
+  # ── Stage 2: Lint & Validate ───────────────────────────────────────────────
+  lint:
+    name: "Stage 2: Lint & Validate"
+    runs-on: ubuntu-latest
+    needs: security-scan
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Set environment
+        id: set-env
+        run: |
+          if [ "${{ github.ref_name }}" == "main" ]; then
+            echo "STATE_KEY=prod/terraform.tfstate" >> $GITHUB_OUTPUT
+          else
+            echo "STATE_KEY=test/terraform.tfstate" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Terraform Init
+        run: terraform init -backend-config="key=${{ steps.set-env.outputs.STATE_KEY }}"
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        run: terraform validate
+
+  # ── Stage 3: Plan ──────────────────────────────────────────────────────────
+  plan:
+    name: "Stage 3: Terraform Plan"
+    runs-on: ubuntu-latest
+    needs: lint
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    outputs:
+      env_name: ${{ steps.set-env.outputs.ENV }}
+      state_key: ${{ steps.set-env.outputs.STATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set environment
+        id: set-env
+        run: |
+          if [ "${{ github.ref_name }}" == "main" ]; then
+            echo "ENV=prod" >> $GITHUB_OUTPUT
+            echo "STATE_KEY=prod/terraform.tfstate" >> $GITHUB_OUTPUT
+          else
+            echo "ENV=test" >> $GITHUB_OUTPUT
+            echo "STATE_KEY=test/terraform.tfstate" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init -backend-config="key=${{ steps.set-env.outputs.STATE_KEY }}"
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var-file="envs/${{ steps.set-env.outputs.ENV }}.tfvars" \
+            -out=tfplan \
+            -no-color 2>&1 | tee plan_output.txt
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ steps.set-env.outputs.ENV }}
+          path: tfplan
+
+  # ── Stage 4: Cost Estimate (prod only) ────────────────────────────────────
+  cost-estimate:
+    name: "Stage 4: Cost Estimate (prod only)"
+    runs-on: ubuntu-latest
+    needs: plan
+    if: github.ref_name == 'main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Run Infracost
+        run: |
+          infracost breakdown \
+            --path . \
+            --terraform-var-file envs/prod.tfvars \
+            --format table
+
+  # ── Stage 5: Manual Approval (prod only) ──────────────────────────────────
+  approval:
+    name: "Stage 5: Manual Approval (prod only)"
+    runs-on: ubuntu-latest
+    needs: [plan, cost-estimate]
+    if: github.ref_name == 'main'
+    environment:
+      name: production
+    steps:
+      - name: Approved
+        run: echo "Prod deployment approved by ${{ github.actor }}"
+
+  # ── Stage 6: Apply ─────────────────────────────────────────────────────────
+  apply:
+    name: "Stage 6: Terraform Apply"
+    runs-on: ubuntu-latest
+    needs: [plan, approval]
+    if: |
+      always() &&
+      needs.plan.result == 'success' &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init -backend-config="key=${{ needs.plan.outputs.state_key }}"
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ needs.plan.outputs.env_name }}
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+  # ── Stage 7: Notify ────────────────────────────────────────────────────────
+  notify:
+    name: "Stage 7: Notify"
+    runs-on: ubuntu-latest
+    needs: apply
+    if: always()
+    steps:
+      - name: Pipeline Status
+        run: |
+          if [ "${{ needs.apply.result }}" == "success" ]; then
+            echo "Deployment to ${{ github.ref_name }} succeeded"
+            echo "Commit: ${{ github.sha }}"
+            echo "Triggered by: ${{ github.actor }}"
+          else
+            echo "Deployment to ${{ github.ref_name }} FAILED"
+            echo "Commit: ${{ github.sha }}"
+            echo "Triggered by: ${{ github.actor }}"
+            exit 1
+          fi
