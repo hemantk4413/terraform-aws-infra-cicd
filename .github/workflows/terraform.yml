@@ -104,32 +104,11 @@ jobs:
           name: tfplan-${{ steps.set-env.outputs.ENV }}
           path: tfplan
 
-  # ── Stage 4: Cost Estimate (prod only) ────────────────────────────────────
-  cost-estimate:
-    name: "Stage 4: Cost Estimate (prod only)"
+  # ── Stage 4: Manual Approval (prod only) ──────────────────────────────────
+  approval:
+    name: "Stage 4: Manual Approval (prod only)"
     runs-on: ubuntu-latest
     needs: plan
-    if: github.ref_name == 'main'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Infracost
-        uses: infracost/actions/setup@v3
-        with:
-          api-key: ${{ secrets.INFRACOST_API_KEY }}
-
-      - name: Run Infracost
-        run: |
-          infracost breakdown \
-            --path . \
-            --terraform-var-file envs/prod.tfvars \
-            --format table
-
-  # ── Stage 5: Manual Approval (prod only) ──────────────────────────────────
-  approval:
-    name: "Stage 5: Manual Approval (prod only)"
-    runs-on: ubuntu-latest
-    needs: [plan, cost-estimate]
     if: github.ref_name == 'main'
     environment:
       name: production
@@ -137,9 +116,9 @@ jobs:
       - name: Approved
         run: echo "Prod deployment approved by ${{ github.actor }}"
 
-  # ── Stage 6: Apply ─────────────────────────────────────────────────────────
+  # ── Stage 5: Apply ─────────────────────────────────────────────────────────
   apply:
-    name: "Stage 6: Terraform Apply"
+    name: "Stage 5: Terraform Apply"
     runs-on: ubuntu-latest
     needs: [plan, approval]
     if: |
