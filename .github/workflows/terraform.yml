@@ -168,22 +168,4 @@ jobs:
       - name: Terraform Apply
         run: terraform apply -auto-approve tfplan
 
-  # ── Stage 7: Notify ────────────────────────────────────────────────────────
-  notify:
-    name: "Stage 7: Notify"
-    runs-on: ubuntu-latest
-    needs: apply
-    if: always()
-    steps:
-      - name: Pipeline Status
-        run: |
-          if [ "${{ needs.apply.result }}" == "success" ]; then
-            echo "Deployment to ${{ github.ref_name }} succeeded"
-            echo "Commit: ${{ github.sha }}"
-            echo "Triggered by: ${{ github.actor }}"
-          else
-            echo "Deployment to ${{ github.ref_name }} FAILED"
-            echo "Commit: ${{ github.sha }}"
-            echo "Triggered by: ${{ github.actor }}"
-            exit 1
-          fi
+
